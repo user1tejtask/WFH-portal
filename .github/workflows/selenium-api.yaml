@@ -32,19 +32,46 @@ jobs:
           pip install pyotp==2.9.0
           pip install cryptography==42.0.5
 
-      # Replaces ALL your previous Chrome install steps
-      - name: Setup Chrome + matching ChromeDriver
-        uses: browser-actions/setup-chrome@v1
-        with:
-          chrome-version: stable
-        id: setup-chrome
-
-      - name: Export Chrome paths
+      - name: Setup Chrome + ChromeDriver (auto-matched)
         run: |
-          echo "CHROME_PATH=${{ steps.setup-chrome.outputs.chrome-path }}" >> $GITHUB_ENV
-          echo "CHROMEDRIVER_PATH=${{ steps.setup-chrome.outputs.chromedriver-path }}" >> $GITHUB_ENV
-          ${{ steps.setup-chrome.outputs.chrome-path }} --version
-          ${{ steps.setup-chrome.outputs.chromedriver-path }} --version
+          # Install Chrome
+          wget -q -O /tmp/chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+          sudo apt-get install -y /tmp/chrome.deb
+
+          # Get the exact Chrome version
+          CHROME_VERSION=$(google-chrome --version | grep -oP '\d+\.\d+\.\d+\.\d+')
+          CHROME_MAJOR=$(echo $CHROME_VERSION | cut -d. -f1)
+          echo "Chrome version: $CHROME_VERSION (major: $CHROME_MAJOR)"
+
+          # Download the matching ChromeDriver using Chrome for Testing API
+          DRIVER_URL="https://googlechromelabs.github.io/chrome-for-testing/known-good-versions-with-downloads.json"
+          CHROMEDRIVER_URL=$(curl -s $DRIVER_URL | python3 -c "
+          import sys, json
+          data = json.load(sys.stdin)
+          versions = [v for v in data['versions'] if v['version'].startswith('$CHROME_MAJOR.')]
+          # Pick the last matching version
+          match = versions[-1] if versions else None
+          if match:
+              for d in match['downloads'].get('chromedriver', []):
+                  if d['platform'] == 'linux64':
+                      print(d['url'])
+                      break
+          ")
+
+          echo "ChromeDriver URL: $CHROMEDRIVER_URL"
+          wget -q -O /tmp/chromedriver.zip "$CHROMEDRIVER_URL"
+          unzip -q /tmp/chromedriver.zip -d /tmp/chromedriver_extract
+          DRIVER_BIN=$(find /tmp/chromedriver_extract -name "chromedriver" -type f)
+          sudo mv "$DRIVER_BIN" /usr/local/bin/chromedriver
+          sudo chmod +x /usr/local/bin/chromedriver
+
+          # Verify both match
+          google-chrome --version
+          chromedriver --version
+
+          # Export paths
+          echo "CHROME_PATH=$(which google-chrome)" >> $GITHUB_ENV
+          echo "CHROMEDRIVER_PATH=/usr/local/bin/chromedriver" >> $GITHUB_ENV
 
       - name: Install Xvfb
         run: sudo apt-get install -y xvfb
